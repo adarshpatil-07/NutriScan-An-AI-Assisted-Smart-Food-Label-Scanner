@@ -12,6 +12,14 @@ import { parseNutrition, ParsedNutritionData } from "@/lib/parseNutrition";
 import { parseIngredients, ParsedIngredientsData } from "@/lib/parseIngredients";
 import { generateNutritionSummary, NutritionTag } from "@/lib/nutritionSummary";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
+import {
+  getDietaryProfile,
+  saveScanRecord,
+  updateScanRecord,
+  DietaryProfile,
+} from "@/lib/storage";
+import { validateNutritionValues } from "@/lib/validation";
+import { matchProfileIngredients, ProfileMatchResult } from "@/lib/profileMatcher";
 
 type AppState = "idle" | "ready" | "processing" | "success" | "error";
 
@@ -31,6 +39,9 @@ export default function HomePage() {
   const [nutrition, setNutrition] = useState<ParsedNutritionData | null>(null);
   const [ingredients, setIngredients] = useState<ParsedIngredientsData | null>(null);
   const [summaryTags, setSummaryTags] = useState<NutritionTag[]>([]);
+  const [validationFlags, setValidationFlags] = useState<Record<string, string>>({});
+  const [profileMatches, setProfileMatches] = useState<ProfileMatchResult | null>(null);
+  const [savedScanId, setSavedScanId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
 
   // AI Explanation state
@@ -43,7 +54,10 @@ export default function HomePage() {
   const fetchExplanation = async (
     nutrients: ParsedNutritionData,
     ings: ParsedIngredientsData,
-    tags: NutritionTag[]
+    tags: NutritionTag[],
+    profile?: DietaryProfile,
+    sanityWarnings?: string[],
+    recordIdToUpdate?: string | null
   ) => {
     setExplanationStatus("loading");
     setExplanationError(null);
@@ -57,6 +71,8 @@ export default function HomePage() {
           ingredientsData: ings,
           summaryTags: tags,
           language,
+          dietaryProfile: profile,
+          sanityWarnings,
         }),
       });
 
@@ -71,11 +87,19 @@ export default function HomePage() {
         return;
       }
 
-      setExplanationData({
+      const explanation = {
         explanation: result.explanation,
         takeaway: result.takeaway,
-      });
+      };
+
+      setExplanationData(explanation);
       setExplanationStatus("success");
+
+      // Attach explanation to saved scan record in history
+      const targetId = recordIdToUpdate || savedScanId;
+      if (targetId) {
+        updateScanRecord(targetId, { explanationData: explanation });
+      }
     } catch (err: any) {
       console.error("Failed to fetch explanation:", err);
       setExplanationError(
@@ -93,6 +117,9 @@ export default function HomePage() {
     setNutrition(null);
     setIngredients(null);
     setSummaryTags([]);
+    setValidationFlags({});
+    setProfileMatches(null);
+    setSavedScanId(null);
     setExplanationStatus("idle");
     setExplanationData(null);
     setExplanationError(null);
@@ -105,6 +132,9 @@ export default function HomePage() {
     setNutrition(null);
     setIngredients(null);
     setSummaryTags([]);
+    setValidationFlags({});
+    setProfileMatches(null);
+    setSavedScanId(null);
     setErrorText(null);
     setProgress({ status: "idle", progress: 0, message: "Initializing…" });
     setExplanationStatus("idle");
@@ -131,19 +161,74 @@ export default function HomePage() {
         setProgress(p);
       });
 
-      // Pure TypeScript deterministic parsing of raw OCR text
+      // 1. Load active dietary profile
+      const userProfile = getDietaryProfile();
+
+      // 2. Pure TypeScript deterministic parsing of raw OCR text
       const parsedNutrients = parseNutrition(result.text);
       const parsedIngs = parseIngredients(result.text);
-      const tags = generateNutritionSummary(parsedNutrients);
+
+      // 3. Validation sanity checks (identifies OCR misreads without mutating numbers)
+      const validation = validateNutritionValues(parsedNutrients);
+
+      // 4. Generate summary tags incorporating profile-specific rules
+      const tags = generateNutritionSummary(parsedNutrients, userProfile);
+
+      // 5. Match ingredients against user allergen and diet preferences
+      const matches = matchProfileIngredients(
+        parsedIngs.ingredients,
+        parsedIngs.rawIngredientsBlock,
+        userProfile
+      );
 
       setOcrResult(result);
       setNutrition(parsedNutrients);
       setIngredients(parsedIngs);
       setSummaryTags(tags);
+      setValidationFlags(validation.flags);
+      setProfileMatches(matches);
+
+      // 6. Inferred product name from image or sample
+      let inferredName = "Unnamed product";
+      if (selectedFile?.name) {
+        const clean = selectedFile.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+        if (clean.toLowerCase().includes("granola")) {
+          inferredName = "Nature Crunch Granola";
+        } else if (clean.toLowerCase().includes("soup")) {
+          inferredName = "Organic Vegetable Soup";
+        } else if (clean && clean.trim().length > 0 && clean.toLowerCase() !== "image") {
+          inferredName = clean.charAt(0).toUpperCase() + clean.slice(1);
+        }
+      }
+
+      // 7. Auto-save scan record (capped at 50, skips empty scans)
+      const saved = saveScanRecord({
+        productName: inferredName,
+        nutrition: parsedNutrients,
+        ingredientsData: parsedIngs,
+        summaryTags: tags,
+        explanationData: null,
+        ocrResult: {
+          text: result.text,
+          confidence: result.confidence,
+          lines: result.lines,
+        },
+        validationFlags: validation.flags,
+      });
+
+      const recordId = saved?.id || null;
+      setSavedScanId(recordId);
       setAppState("success");
 
-      // Automatically trigger AI explanation layer
-      fetchExplanation(parsedNutrients, parsedIngs, tags);
+      // 8. Automatically trigger AI explanation layer (profile-aware)
+      fetchExplanation(
+        parsedNutrients,
+        parsedIngs,
+        tags,
+        userProfile,
+        validation.warnings,
+        recordId
+      );
     } catch (err: any) {
       console.error("OCR execution error:", err);
       setErrorText(
@@ -156,7 +241,16 @@ export default function HomePage() {
 
   const handleRetryExplanation = () => {
     if (nutrition && ingredients) {
-      fetchExplanation(nutrition, ingredients, summaryTags);
+      const userProfile = getDietaryProfile();
+      const validation = validateNutritionValues(nutrition);
+      fetchExplanation(
+        nutrition,
+        ingredients,
+        summaryTags,
+        userProfile,
+        validation.warnings,
+        savedScanId
+      );
     }
   };
 
@@ -198,6 +292,7 @@ export default function HomePage() {
 
       ctx.font = "14px sans-serif";
       ctx.fillText("8 servings per container", 30, 135);
+
       ctx.font = "bold 15px sans-serif";
       ctx.fillText("Serving size: 2/3 cup (55g)", 30, 155);
 
@@ -364,6 +459,8 @@ export default function HomePage() {
                 handleAnalyze(activeImageSource);
               }
             }}
+            validationFlags={validationFlags}
+            profileMatches={profileMatches}
           />
 
           {/* Collapsible reference to scanned photo */}

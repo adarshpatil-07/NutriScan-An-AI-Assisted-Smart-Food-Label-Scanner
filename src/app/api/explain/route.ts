@@ -3,12 +3,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedNutritionData } from "@/lib/parseNutrition";
 import { ParsedIngredientsData } from "@/lib/parseIngredients";
 import { NutritionTag } from "@/lib/nutritionSummary";
+import { DietaryProfile, hasActiveProfile } from "@/lib/storage";
 
 interface ExplainRequestBody {
   nutrition?: ParsedNutritionData;
   ingredientsData?: ParsedIngredientsData;
   summaryTags?: NutritionTag[];
   language?: string;
+  dietaryProfile?: DietaryProfile;
+  sanityWarnings?: string[];
 }
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
@@ -18,6 +21,8 @@ Your goal is to provide honest, plain-language explanations of food labels for e
 Guidelines:
 - Explain the nutrition profile in plain, accessible language (assume a general audience, not a nutritionist).
 - Briefly note anything notable about the ingredients if relevant (e.g. whole food bases vs refined ingredients, additives, sweeteners, sodium sources, allergens) without being alarmist or making medical claims.
+- If the user has provided a dietary profile, address how this food relates to their profile where relevant (e.g. "for someone watching sodium, this is notable because…"), keep it plain and concise, and do NOT give medical advice or clinical diagnoses.
+- If any OCR sanity cautions are provided, briefly note that those specific numbers may be unreliable OCR misreads and encourage checking the label.
 - Give a short overall takeaway (2-4 sentences max for the takeaway).
 - Avoid generic filler phrases like "As an AI", "It's important to note", or "In summary" — write directly and concisely.
 - If a target language is specified, write the explanation and takeaway clearly in that language.
@@ -29,7 +34,7 @@ const responseSchema = {
     explanation: {
       type: Type.STRING,
       description:
-        "A direct, plain-language explanation of this food's nutritional profile and ingredients. Highlight what stands out (e.g. macronutrient balance, notable ingredients, processing level, sodium/sugar density) without making alarmist statements or medical diagnoses. Write as a knowledgeable guide.",
+        "A direct, plain-language explanation of this food's nutritional profile and ingredients. Highlight what stands out (e.g. macronutrient balance, notable ingredients, processing level, sodium/sugar density, and fit with user's dietary profile if provided) without making alarmist statements or medical diagnoses. Write as a knowledgeable guide.",
     },
     takeaway: {
       type: Type.STRING,
@@ -43,7 +48,7 @@ const responseSchema = {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as ExplainRequestBody;
-    const { nutrition, ingredientsData, summaryTags, language } = body;
+    const { nutrition, ingredientsData, summaryTags, language, dietaryProfile, sanityWarnings } = body;
 
     if (!nutrition && !ingredientsData) {
       return NextResponse.json(
@@ -98,6 +103,36 @@ export async function POST(request: NextRequest) {
         ? summaryTags.map((t) => `${t.label} (${t.detail})`).join("; ")
         : "None";
 
+    // Format user profile section ONLY if set
+    let profileSection = "";
+    if (hasActiveProfile(dietaryProfile)) {
+      const activeConditions: string[] = [];
+      if (dietaryProfile?.conditions?.diabetic) activeConditions.push("Diabetic / watching sugar");
+      if (dietaryProfile?.conditions?.bloodPressure) activeConditions.push("High blood pressure / watching sodium");
+      if (dietaryProfile?.conditions?.cholesterol) activeConditions.push("Watching cholesterol / fat");
+
+      const profileLines: string[] = [];
+      if (activeConditions.length > 0) {
+        profileLines.push(`- Conditions: ${activeConditions.join(", ")}`);
+      }
+      if (dietaryProfile?.allergens && dietaryProfile.allergens.length > 0) {
+        profileLines.push(`- Allergens to avoid: ${dietaryProfile.allergens.join(", ")}`);
+      }
+      if (dietaryProfile?.dietType && dietaryProfile.dietType !== "none") {
+        profileLines.push(`- Diet type: ${dietaryProfile.dietType}`);
+      }
+
+      if (profileLines.length > 0) {
+        profileSection = `\nUSER DIETARY PROFILE (Address where relevant, without giving medical advice):\n${profileLines.join("\n")}\n`;
+      }
+    }
+
+    // Format sanity cautions section ONLY if present
+    let cautionsSection = "";
+    if (sanityWarnings && sanityWarnings.length > 0) {
+      cautionsSection = `\nPOTENTIAL OCR MISREAD CAUTIONS:\n${sanityWarnings.map((w) => `- ${w}`).join("\n")}\n(Mention that these numbers may be OCR misreads so the consumer should verify with the package.)\n`;
+    }
+
     const languageInstruction =
       language === "hi"
         ? "Write the explanation and takeaway in Hindi (हिन्दी)."
@@ -118,7 +153,7 @@ ${allergensList}
 
 RULE-BASED SUMMARY HIGHLIGHTS:
 ${tagsList}
-
+${profileSection}${cautionsSection}
 LANGUAGE REQUIREMENT:
 ${languageInstruction}
 
@@ -179,7 +214,6 @@ Respond strictly with a JSON object containing "explanation" and "takeaway" fiel
 
       console.error("Gemini API error:", genErr);
 
-      // Surface the underlying API message for easier debugging
       const errMessage: string =
         genErr?.message || "Gemini API error. Explanation unavailable right now.";
       const status = errMessage.includes("404") ? 502 : 502;
