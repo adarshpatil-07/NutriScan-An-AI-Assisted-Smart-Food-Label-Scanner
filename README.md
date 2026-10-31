@@ -1,27 +1,31 @@
 # NutriScan : An AI-Assisted Smart Food Label Scanner
 
-NutriScan is a client-first web application designed to help consumers decode packaged food labels. It combines browser-based image preprocessing and Optical Character Recognition (OCR) with deterministic nutrition parsing and Google's Gemini 3.6 Flash model to deliver honest, plain-language explanations of nutritional values, ingredients, and allergen declarations.
+NutriScan is a client-first web application designed to help consumers decode packaged food labels. It combines browser-based image preprocessing and Optical Character Recognition (OCR) with deterministic nutrition parsing, customizable dietary profiles, local scan history with trend analytics, and Google's Gemini Flash model to deliver honest, plain-language explanations of nutritional values, ingredients, and allergen declarations.
 
 ---
 
 ## What the Application Does
 
-Many consumers find nutrition fact tables and lengthy ingredient statements on food packaging confusing, misleading, or hard to read. NutriScan simplifies this process:
+Many consumers find nutrition fact tables and lengthy ingredient statements on food packaging confusing, misleading, or hard to read. NutriScan simplifies this process with a completely local-first, zero-database architecture:
 
 1. **Captures or Uploads Labels**: Accepts packaged food photos via file upload, camera capture, drag-and-drop, or built-in sample presets.
 2. **Optimizes Images Locally**: Applies adaptive scaling, grayscale conversion, and percentile-based contrast stretching using HTML5 Canvas before OCR.
 3. **Extracts Text Client-Side**: Uses Tesseract.js in a dedicated browser Web Worker thread so sensitive image files never leave your device for OCR.
 4. **Parses Metrics Deterministically**: Employs regex-driven parsers to extract core macronutrients, sodium, fiber, sugars, serving size, ingredients lists, and allergen declarations.
-5. **Highlights Key Nutritional Flags**: Evaluates rule-based health signals (e.g., high sugar density, high sodium, good fiber source) without alarmist claims.
-6. **Generates Plain-Language Explanations**: Sends structured data to a server-side Gemini 3.6 Flash endpoint to produce an easy-to-understand breakdown and a short consumer takeaway.
-7. **Supports Multiple Languages**: Provides full interface translation in English, Hindi, and Marathi while preserving exact numerical nutrition values.
-8. **Offers Persistent Dark Mode**: Features a clean, low-contrast dark theme toggle with zero-flash rendering on reload.
+5. **Performs Sanity Validation Checks**: Flags implausible OCR numbers (e.g., sugar exceeding carbohydrates, macros over 100g/serving, extreme digit misreads) with clear warning indicators without silently altering extracted numbers.
+6. **Applies Personalized Dietary Profiles**:
+   - **Health Conditions**: Stricter thresholds for diabetic users ($\ge 5\text{g}$ sugar), high blood pressure ($\ge 200\text{mg}$ sodium), and cholesterol watchers ($\ge 8\text{g}$ fat), surfacing profile-specific tags like *"High sugar for your profile"*.
+   - **Allergen & Diet Detection**: Scans ingredients against regional and international keywords (*maida, atta, ghee, kaju, badam, moongphali, etc.*) and visibly flags allergen and vegetarian/vegan diet conflicts.
+7. **Generates Profile-Aware AI Explanations**: Sends structured data and active dietary preferences to a server-side Gemini Flash endpoint to produce an easy-to-understand breakdown, highlight dietary fit, and provide a short consumer takeaway without medical advice or diagnoses.
+8. **Tracks Scans with Local History & Trend Charts**: Automatically saves up to 50 recent scans in `localStorage`. Includes a summary stats row, pure CSS/SVG bar charts for sugar and sodium trends over the last 10 scans, inline product renaming, and full result re-inspection.
+9. **Supports Multiple Languages**: Provides full interface translation in English, Hindi, and Marathi while preserving exact numerical nutrition values.
+10. **Offers Persistent Dark Mode**: Features a clean, low-contrast dark theme toggle with zero-flash rendering on reload.
 
 ---
 
 ## Architecture & Analysis Pipeline
 
-```
+```text
 [ Food Packaging Image ]
            │
            ▼
@@ -36,24 +40,87 @@ Many consumers find nutrition fact tables and lengthy ingredient statements on f
    - Returns extracted text, line data & confidence score
            │
            ▼
-[ Deterministic Parsers (TypeScript) ]
-   - parseNutrition.ts   -> Calories, Fats, Carbs, Sugars, Fiber, Protein, Sodium
-   - parseIngredients.ts -> Ingredients array, allergen identification
-   - nutritionSummary.ts -> Rule-based nutritional highlight tags
+[ Deterministic Parsers & Sanity Validation ]
+   - parseNutrition.ts    -> Extract Calories, Fats, Carbs, Sugars, Fiber, Protein, Sodium
+   - parseIngredients.ts  -> Extract ingredients list & package-declared allergens
+   - validation.ts        -> Flag implausible values (sugar > carbs, macro > 100g, etc.)
+           │
+           ▼
+[ Dietary Profile Matcher (Local Storage) ]
+   - profileMatcher.ts    -> Scan ingredients for allergens (peanuts, tree nuts, milk, etc.) & diet conflicts
+   - nutritionSummary.ts  -> Stricter thresholds for diabetic, hypertension, and cholesterol profiles
+           │
+           ▼
+[ Local Storage History Layer (lib/storage.ts) ]
+   - Auto-saves scan record (capped at 50, filters empty scans)
+   - Powers /history dashboard, stats metrics, and SVG trend charts
            │
            ▼
 [ Server-Side AI Layer (/api/explain) ]
    - Google Gemini 3.6 Flash via @google/genai
    - Schema-enforced JSON generation (explanation + takeaway)
-   - Language-aware prompt instruction
+   - Profile-aware & OCR-sanity-aware prompt guidance
            │
            ▼
-[ UI Presentation ]
-   - Structured Nutrition Facts table (numbers & units preserved)
-   - Ingredients list with allergen warning badges
+[ UI Presentation (Scan / History / Profile) ]
+   - Structured Nutrition Facts table with "Check this value" sanity badges
+   - Ingredients list with prominent allergen & diet conflict alerts
    - Plain-language takeaway card
    - Collapsible raw OCR text inspection disclosure
 ```
+
+---
+
+## Key Features & Modules
+
+### 1. Navigation & App Routes
+
+The top navigation bar provides quick, accessible switching between the three main workspaces:
+
+* **Scan** (`/`): The core live analysis pipeline (upload/camera, image preview, OCR execution, structured results table, and AI breakdown).
+* **History** (`/history`): Personal scan dashboard featuring aggregated metrics, SVG trend charts, inline editable product names, and a full results viewer.
+* **Profile** (`/profile`): Local dietary preferences manager for health conditions, allergen alerts, and diet types.
+
+### 2. Dietary Profile & Personalization (`/profile`)
+
+Users can customize their dietary constraints. All profile data is saved exclusively in the browser's `localStorage` and never transmitted to a server:
+
+* **Health Conditions**:
+  * **Diabetic / watching sugar**: Lowers the caution threshold to $\ge 5\text{g}$ sugar per serving and generates a *"High sugar for your profile"* badge.
+  * **High blood pressure / watching sodium**: Lowers the sodium caution threshold to $\ge 200\text{mg}$ per serving.
+  * **Watching cholesterol / fat**: Lowers the total fat caution threshold to $\ge 8\text{g}$ per serving.
+* **Allergen Detection**: Scans parsed ingredient statements for 9 common allergen families: Peanuts, Tree Nuts, Milk/Dairy, Eggs, Soy, Wheat/Gluten, Fish, Shellfish, and Sesame.
+  * Uses whole-word boundary regex matching to avoid false positives (e.g., *"butternut squash"* will not match *"butter"*).
+  * Includes common regional and Indian ingredient terminology (*e.g., maida, atta, suji, rava, ghee, paneer, dahi, kaju, badam, moongphali, til*).
+* **Diet Type**: Supports **None**, **Vegetarian** (flags animal flesh, poultry, fish, gelatin, lard, carmine), and **Vegan** (flags all animal-derived ingredients, including dairy, eggs, and honey).
+* **Auto-Save & Reset**: Adjustments save instantly with a subtle confirmation indicator; includes a confirmation-guarded profile reset action.
+
+### 3. Scan History & Dashboard (`/history`)
+
+NutriScan preserves past scan results without requiring a backend database or user login:
+
+* **Compact Stats Row**: Plain bordered metric cells summarizing:
+  * Total Scans saved.
+  * Average Sugar per serving across scans where sugar was detected.
+  * Average Sodium per serving across scans where sodium was detected.
+  * Count of scans containing one or more high caution flags.
+* **Pure CSS/SVG Trend Bar Charts**: Understated, lightweight SVG bar charts showing per-serving sugar (g) and sodium (mg) trends across the last 10 scans with axis lines, values, and scan numbers. Zero third-party charting libraries.
+* **Chronological List**: Displays saved scans (newest first) with timestamps, summary pills, and key nutrient previews.
+* **Inline Product Renaming**: Click the pencil icon next to any product name to rename it inline (e.g., updating *"Unnamed product"* to *"Nature Crunch Granola"*).
+* **Full Result Viewer**: Clicking **"View"** reopens the complete nutrition table, ingredients list, allergen alerts, and Gemini explanation using the identical `StructuredResultsView` component as the live scanner.
+* **Management & Empty State**: Delete individual records, clear all history with a confirmation step, or tap the empty-state call-to-action to scan a new label.
+
+### 4. Result Sanity Checks (`src/lib/validation.ts`)
+
+OCR engines can occasionally misread numbers on wrinkled, curved, or reflective packaging. Rather than silently altering numbers, NutriScan performs automated sanity checks:
+
+* **Sugar > Carbohydrates**: Flags cases where extracted sugar exceeds total carbohydrates.
+* **Extreme Single-Serving Macros**: Flags any individual macronutrient (protein, carbs, fats, sugars, fiber) exceeding $100\text{g}$ per serving.
+* **Unrealistic Calories**: Flags calorie counts $> 1500\text{ kcal}$ per serving or negative numbers.
+* **Unrealistic Sodium**: Flags sodium values exceeding $10,000\text{mg}$ per serving.
+* **Macro Sum vs. Serving Weight**: Checks if the sum of fats, carbs, and protein significantly exceeds the package's stated serving size in grams.
+* **UI Indicator**: Displays a subtle `⚠️ Check this value` indicator beside the affected table row with a descriptive tooltip.
+* **AI Awareness**: Cautions are included in the prompt to the Gemini API so the explanation explicitly advises the consumer to double-check those figures against the package.
 
 ---
 
@@ -74,7 +141,7 @@ Users can toggle between the original image and the contrast-enhanced OCR previe
 ## Gemini / AI Integration
 
 * **Model Used**: `gemini-3.6-flash` (Google Gemini 3.x generation).
-* **Role**: Translates raw numerical data and ingredient terms into accessible consumer takeaways. It does not guess nutrition values from scratch; it explains the verified data extracted by the deterministic parsers.
+* **Role**: Translates raw numerical data and ingredient terms into accessible consumer takeaways. It does not guess nutrition values from scratch; it explains the verified data extracted by the deterministic parsers and addresses user dietary profile constraints where relevant.
 * **Server-Side Security**: All Gemini interactions run strictly server-side in Next.js route handlers (`src/app/api/explain/route.ts`). The `GEMINI_API_KEY` is never exposed to the client or browser bundle.
 * **Strict JSON Schema**: The API requests enforce strict structured outputs using `responseMimeType: "application/json"` and `responseSchema` defining `explanation` and `takeaway` string fields.
 * **Offline & Missing Key Resilience**: If no Gemini API key is configured, the application continues to function normally for OCR extraction, tabular nutrition display, allergen detection, and highlight tags.
@@ -90,7 +157,7 @@ NutriScan includes a built-in internationalization (i18n) architecture supportin
 * **Marathi** (`mr` - मराठी)
 
 ### Key Features of the Translation System:
-* **Complete Interface Translation**: Header navigation, upload instructions, file buttons, image previews, progress indicators, table headers, allergen warnings, and error dialogs.
+* **Complete Interface Translation**: Header navigation, upload instructions, file buttons, image previews, progress indicators, table headers, allergen warnings, profile tags, and error dialogs.
 * **Numerical Value Preservation**: Nutrition numbers, units, and percentages (e.g., `230 kcal`, `8g`, `37g`, `160mg`, `10%`) are strictly preserved and never mistranslated.
 * **Language-Aware AI Summaries**: Selected UI language is passed to `/api/explain` so the Gemini model generates takeaways directly in the chosen language.
 * **Persistence**: The user's language selection is saved in `localStorage` (`food_label_language`) and restored across sessions.
@@ -118,6 +185,8 @@ NutriScan includes a built-in internationalization (i18n) architecture supportin
 | **Styling** | [Tailwind CSS 3](https://tailwindcss.com/) with CSS Custom Properties |
 | **OCR Engine** | [Tesseract.js 5](https://github.com/naptha/tesseract.js) (Browser Web Worker) |
 | **Generative AI** | [@google/genai](https://www.npmjs.com/package/@google/genai) (`gemini-3.6-flash`) |
+| **Data Persistence** | Browser `localStorage` (SSR-safe, zero database required) |
+| **Charts** | Native CSS & inline SVG (zero chart dependencies) |
 | **Icons** | [Lucide React](https://lucide.dev/) |
 | **Linter** | ESLint with `eslint-config-next` |
 
@@ -127,42 +196,49 @@ NutriScan includes a built-in internationalization (i18n) architecture supportin
 
 ```text
 food-label-explainer/
-├── public/                     # Static assets
+├── public/                       # Static assets
 ├── src/
 │   ├── app/
 │   │   ├── api/
 │   │   │   └── explain/
-│   │   │       └── route.ts    # Server-side Gemini 3.6 Flash explanation route
-│   │   ├── globals.css         # CSS design tokens for light/dark themes
-│   │   ├── layout.tsx          # Root layout, head scripts, and shell structure
-│   │   ├── page.tsx            # Main application workflow & state management
-│   │   └── providers.tsx       # Client provider wrapper (Language context)
+│   │   │       └── route.ts      # Profile-aware Gemini AI explanation endpoint
+│   │   ├── history/
+│   │   │   └── page.tsx          # Scan history dashboard, stats & SVG trend charts
+│   │   ├── profile/
+│   │   │   └── page.tsx          # Dietary conditions, allergens & diet preferences form
+│   │   ├── globals.css           # CSS design tokens for light/dark themes
+│   │   ├── layout.tsx            # Root layout, head script, navigation header
+│   │   ├── page.tsx              # Main scanning interface & OCR workflow
+│   │   └── providers.tsx         # Language context provider wrapper
 │   ├── components/
-│   │   ├── ErrorMessage.tsx    # Recovery screen with actionable photography tips
-│   │   ├── ExplanationView.tsx # Gemini AI explanation and takeaway card
-│   │   ├── Header.tsx          # App header with language selector and theme toggle
-│   │   ├── ImagePreview.tsx    # Cropping/previewing & contrast enhancement toggle
-│   │   ├── LanguageSelector.tsx# Compact language dropdown (EN, HI, MR)
-│   │   ├── OcrResultView.tsx   # Monospace raw OCR disclosure view
-│   │   ├── OcrStatus.tsx       # Transparent OCR progress indicator
-│   │   ├── StructuredResultsView.tsx # Tabular nutrition facts & ingredients breakdown
-│   │   ├── ThemeToggle.tsx     # Persistent Sun/Moon dark mode toggle
-│   │   └── UploadArea.tsx      # Drag-and-drop dropzone & mobile camera capture
+│   │   ├── ErrorMessage.tsx      # Actionable photo recovery tips
+│   │   ├── ExplanationView.tsx   # AI explanation & takeaway display
+│   │   ├── Header.tsx            # Navigation bar (Scan, History, Profile) & controls
+│   │   ├── ImagePreview.tsx      # Canvas image preview & contrast boost toggle
+│   │   ├── LanguageSelector.tsx  # Language switcher (EN, HI, MR)
+│   │   ├── OcrResultView.tsx     # Monospace raw OCR text disclosure
+│   │   ├── OcrStatus.tsx         # Transparent worker progress indicator
+│   │   ├── StructuredResultsView.tsx # Nutrition table, ingredients, flags & sanity notes
+│   │   ├── ThemeToggle.tsx       # Sun/Moon theme toggle
+│   │   └── UploadArea.tsx        # Drag-and-drop & camera capture zone
 │   └── lib/
 │       ├── i18n/
-│       │   ├── LanguageContext.tsx # Translation context provider & hook
-│       │   └── translations.ts     # Type-safe dictionaries (en, hi, mr)
-│       ├── nutritionSummary.ts # Deterministic rule-based nutrient flags
-│       ├── ocr.ts              # Tesseract.js worker initialization and execution
-│       ├── parseIngredients.ts # Ingredients & allergen regex parser
-│       ├── parseNutrition.ts   # Core nutrient regex extraction & unit normalization
-│       └── preprocess.ts       # HTML5 Canvas scaling, grayscale, and contrast booster
-├── .env.example                # Safe environment variable template
-├── .eslintrc.json              # ESLint configuration
-├── next.config.mjs             # Next.js build configuration
-├── package.json                # Project dependencies and npm scripts
-├── tailwind.config.ts          # Tailwind theme tokens and darkMode configuration
-└── tsconfig.json               # TypeScript compiler configuration
+│       │   ├── LanguageContext.tsx # Translation hook & context
+│       │   └── translations.ts   # Multilingual dictionaries (en, hi, mr)
+│       ├── nutritionSummary.ts   # Rule-based highlight tags with profile threshold logic
+│       ├── ocr.ts                # Tesseract.js worker initialization & execution
+│       ├── parseIngredients.ts   # Ingredient extraction & regex splitting
+│       ├── parseNutrition.ts     # Deterministic nutrient extraction & unit normalization
+│       ├── preprocess.ts         # Canvas resolution scaling, grayscale & contrast
+│       ├── profileMatcher.ts     # Allergen keyword & vegetarian/vegan diet matcher
+│       ├── storage.ts            # Typed, SSR-safe localStorage layer (scans & profile)
+│       └── validation.ts         # Sanity boundary checks for OCR numbers
+├── .env.example                  # Environment variable template
+├── .eslintrc.json                # ESLint configuration
+├── next.config.mjs               # Next.js build configuration
+├── package.json                  # Dependencies and scripts
+├── tailwind.config.ts            # Tailwind styling tokens
+└── tsconfig.json                 # TypeScript configuration
 ```
 
 ---
@@ -171,7 +247,7 @@ food-label-explainer/
 
 * **Node.js**: v18.17.0 or later (v20+ recommended).
 * **Package Manager**: npm (bundled with Node.js), yarn, or pnpm.
-* **Google Gemini API Key**: Obtain a free API key from [Google AI Studio](https://aistudio.google.com/app/apikey) (optional for local OCR, required for AI takeaways).
+* **Google Gemini API Key**: Obtain an API key from [Google AI Studio](https://aistudio.google.com/app/apikey) (optional for local OCR & parsing; required for live AI explanations).
 
 ---
 
@@ -214,7 +290,9 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-> **Tip**: If you do not have a packaged food label photo on hand, click the **"Granola Label"** or **"Soup Label"** sample buttons on the home screen to test the analysis pipeline immediately.
+* Navigate to `/` to scan labels or test with sample granola / vegetable soup buttons.
+* Navigate to `/profile` to set dietary conditions (diabetic, blood pressure, cholesterol, allergens, vegan/vegetarian).
+* Navigate to `/history` to view your personal dashboard, stats, and trend charts.
 
 ---
 
@@ -256,7 +334,7 @@ npm run lint
 * **OCR Accuracy**: OCR performance depends on image sharpness, lighting, packaging curvature, and reflection. Highly reflective foils or severe glare can cause characters to be misread.
 * **Label Layout Variability**: Non-standard nutrition formats (such as non-FDA tables or unformatted novelty layouts) may result in fewer detected metrics. The raw text disclosure is always available to verify unparsed content.
 * **Cold Starts on First OCR Run**: On the very first scan, Tesseract.js fetches the English language traineddata asset (~4 MB). Subsequent scans use the browser cache and run significantly faster.
-* **Offline AI Limitations**: Text extraction and deterministic nutrition parsing run entirely in your local browser without an internet connection. The AI explanation block requires network connectivity to reach the Google Gemini API.
+* **Offline AI Limitations**: Text extraction, deterministic nutrition parsing, sanity checking, and profile matching run entirely in your local browser without an internet connection. The AI explanation block requires network connectivity to reach the Google Gemini API.
 
 ---
 
