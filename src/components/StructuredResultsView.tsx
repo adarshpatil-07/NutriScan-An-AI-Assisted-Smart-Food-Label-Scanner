@@ -10,15 +10,18 @@ import {
   Info,
   ChevronDown,
   CheckCircle2,
+  ArrowLeft,
+  ShieldAlert,
 } from "lucide-react";
 import { OcrResult } from "@/lib/ocr";
 import { ParsedNutritionData } from "@/lib/parseNutrition";
 import { ParsedIngredientsData } from "@/lib/parseIngredients";
 import { NutritionTag } from "@/lib/nutritionSummary";
+import { ProfileMatchResult } from "@/lib/profileMatcher";
 import { ExplanationView, ExplanationData } from "./ExplanationView";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
 
-interface StructuredResultsViewProps {
+export interface StructuredResultsViewProps {
   ocrResult: OcrResult;
   nutrition: ParsedNutritionData;
   ingredientsData: ParsedIngredientsData;
@@ -29,6 +32,13 @@ interface StructuredResultsViewProps {
   onRetryExplanation?: () => void;
   onReset: () => void;
   onReanalyze?: () => void;
+  // History / context additions
+  productName?: string;
+  scanDate?: string;
+  onBack?: () => void;
+  backButtonLabel?: string;
+  validationFlags?: Record<string, string>;
+  profileMatches?: ProfileMatchResult | null;
 }
 
 export function StructuredResultsView({
@@ -42,6 +52,12 @@ export function StructuredResultsView({
   onRetryExplanation,
   onReset,
   onReanalyze,
+  productName,
+  scanDate,
+  onBack,
+  backButtonLabel,
+  validationFlags,
+  profileMatches,
 }: StructuredResultsViewProps) {
   const { t, tTag } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -117,10 +133,21 @@ export function StructuredResultsView({
       {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-subtle">
         <div>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-xs text-secondary hover:text-primary transition-colors inline-flex items-center gap-1.5 mb-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{backButtonLabel || "Back to list"}</span>
+            </button>
+          )}
           <h2 className="text-base font-semibold text-primary">
-            {t.results.title}
+            {productName ? productName : t.results.title}
           </h2>
           <p className="text-xs text-secondary">
+            {scanDate ? `${scanDate} • ` : ""}
             {t.results.detectedSummary(nutrition.detectedCount, ingredientsData.ingredients.length)}
           </p>
         </div>
@@ -153,7 +180,7 @@ export function StructuredResultsView({
         </div>
       )}
 
-      {/* 1. Rule-Based Summary Tags */}
+      {/* 1. Rule-Based Summary Tags (including profile-specific stricter tags) */}
       {summaryTags.length > 0 && (
         <div className="bg-surface border border-subtle rounded-md p-4 space-y-3">
           <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">
@@ -191,7 +218,7 @@ export function StructuredResultsView({
 
       {/* 2. Main Content Grid: Nutrition Facts & Ingredients */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Left Column: Nutrition Facts Table */}
+        {/* Left Column: Nutrition Facts Table with Sanity Indicators */}
         <div className="bg-surface border border-subtle rounded-md p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b-2 border-primary mb-3">
@@ -209,11 +236,12 @@ export function StructuredResultsView({
             <div className="divide-y divide-subtle text-sm">
               {nutrientRows.map((row) => {
                 const detected = row.data !== null;
+                const flagMessage = validationFlags?.[row.key];
 
                 return (
                   <div
                     key={row.key}
-                    className="py-2.5 flex items-center justify-between text-xs sm:text-sm"
+                    className="py-2.5 flex items-start justify-between text-xs sm:text-sm gap-2"
                   >
                     <span
                       className={
@@ -225,17 +253,30 @@ export function StructuredResultsView({
                       {row.label}
                     </span>
 
-                    <span className="tabular-nums font-mono text-xs sm:text-sm">
-                      {detected ? (
-                        <span className="font-semibold text-primary">
-                          {row.formatter(row.data!.value, row.data!.unit)}
-                        </span>
-                      ) : (
-                        <span className="text-secondary italic text-xs">
-                          {t.results.notDetected}
+                    <div className="flex flex-col items-end">
+                      <span className="tabular-nums font-mono text-xs sm:text-sm">
+                        {detected ? (
+                          <span className="font-semibold text-primary">
+                            {row.formatter(row.data!.value, row.data!.unit)}
+                          </span>
+                        ) : (
+                          <span className="text-secondary italic text-xs">
+                            {t.results.notDetected}
+                          </span>
+                        )}
+                      </span>
+
+                      {/* Sanity Check Note */}
+                      {flagMessage && (
+                        <span
+                          className="text-[11px] font-medium text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 mt-0.5"
+                          title={flagMessage}
+                        >
+                          <AlertTriangle className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                          <span>Check this value</span>
                         </span>
                       )}
-                    </span>
+                    </div>
                   </div>
                 );
               })}
@@ -247,10 +288,10 @@ export function StructuredResultsView({
           </div>
         </div>
 
-        {/* Right Column: Ingredients List */}
+        {/* Right Column: Ingredients List with Allergen / Diet Matching */}
         <div className="bg-surface border border-subtle rounded-md p-5 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-subtle mb-3">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pb-3 border-b border-subtle">
               <h3 className="text-sm font-semibold text-primary">
                 {t.results.ingredientsList}
               </h3>
@@ -259,9 +300,50 @@ export function StructuredResultsView({
               </span>
             </div>
 
+            {/* Profile Allergen Matches Banner */}
+            {profileMatches && profileMatches.allergenMatches.length > 0 && (
+              <div className="space-y-1.5" role="alert">
+                {profileMatches.allergenMatches.map((m) => (
+                  <div
+                    key={m.allergenKey}
+                    className="p-2.5 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded text-xs text-amber-950 dark:text-amber-200"
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-300">
+                      <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                      <span>Contains: {m.allergenLabel}</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-1 pl-5">
+                      Detected in: {m.foundInIngredients.join(", ")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Profile Diet Conflicts Banner */}
+            {profileMatches && profileMatches.dietMatches.length > 0 && (
+              <div className="space-y-1.5" role="alert">
+                {profileMatches.dietMatches.map((d, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2.5 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded text-xs text-amber-950 dark:text-amber-200"
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-300">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                      <span>Diet warning: {d.reason}</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-1 pl-5">
+                      Matched: {d.foundInIngredients.join(", ")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* List of Ingredients */}
             {ingredientsData.ingredients.length > 0 ? (
               <div className="space-y-3">
-                <ol className="divide-y divide-subtle/60 text-xs sm:text-sm max-h-[380px] overflow-y-auto pr-1">
+                <ol className="divide-y divide-subtle/60 text-xs sm:text-sm max-h-[340px] overflow-y-auto pr-1">
                   {ingredientsData.ingredients.map((item, idx) => (
                     <li
                       key={idx}
@@ -275,8 +357,9 @@ export function StructuredResultsView({
                   ))}
                 </ol>
 
+                {/* Packaging declared allergens */}
                 {ingredientsData.containsAllergens.length > 0 && (
-                  <div className="pt-3 border-t border-subtle">
+                  <div className="pt-2 border-t border-subtle">
                     <p className="text-xs font-medium text-amber-900 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800 rounded p-2">
                       <span className="font-bold">{t.results.containsAllergens}</span>{" "}
                       {ingredientsData.containsAllergens.join(", ")}
@@ -287,15 +370,16 @@ export function StructuredResultsView({
             ) : (
               <div className="py-8 text-center text-xs text-secondary space-y-1">
                 <p className="font-medium text-primary">{t.results.noIngredientsFound}</p>
-                <p>
-                  {t.results.noIngredientsDesc}
-                </p>
+                <p>{t.results.noIngredientsDesc}</p>
               </div>
             )}
           </div>
 
-          <div className="pt-3 border-t border-subtle mt-4 text-[11px] text-secondary">
-            {t.results.ingredientsOrderNote}
+          <div className="pt-3 border-t border-subtle mt-4 text-[11px] text-secondary space-y-1">
+            <p>{t.results.ingredientsOrderNote}</p>
+            <p className="text-[10px] text-secondary/80">
+              Note: OCR may miss text on curved or reflective packages. Always verify ingredients on the physical label.
+            </p>
           </div>
         </div>
       </div>

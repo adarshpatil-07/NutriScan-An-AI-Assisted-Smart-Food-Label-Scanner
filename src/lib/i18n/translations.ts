@@ -5,6 +5,9 @@ export interface TranslationDictionary {
   appDescription: string;
   nav: {
     title: string;
+    scan: string;
+    history: string;
+    profile: string;
     lightMode: string;
     darkMode: string;
     selectLanguage: string;
@@ -99,6 +102,9 @@ export const translations: Record<SupportedLanguage, TranslationDictionary> = {
       "Extract, examine, and understand packaged food nutrition facts and ingredients with client-side OCR and plain-language explanation.",
     nav: {
       title: "Food Label Explainer",
+      scan: "Scan",
+      history: "History",
+      profile: "Profile",
       lightMode: "Switch to light mode",
       darkMode: "Switch to dark mode",
       selectLanguage: "Select language",
@@ -184,6 +190,9 @@ export const translations: Record<SupportedLanguage, TranslationDictionary> = {
       "High Saturated Fat": "High Saturated Fat",
       "Moderate Sugar": "Moderate Sugar",
       "Moderate Sodium": "Moderate Sodium",
+      "High sugar for your profile": "High sugar for your profile",
+      "High sodium for your profile": "High sodium for your profile",
+      "High fat for your profile": "High fat for your profile",
     },
     error: {
       unableToRead: "Unable to read label",
@@ -203,6 +212,9 @@ export const translations: Record<SupportedLanguage, TranslationDictionary> = {
       "ब्राउज़र-आधारित ओसीआर और सरल स्पष्टीकरण के साथ पैकेज्ड फूड के पोषण तथ्यों और सामग्रियों को निकालें, जांचें और समझें।",
     nav: {
       title: "फूड लेबल एक्सप्लेनर",
+      scan: "स्कैन",
+      history: "इतिहास",
+      profile: "प्रोफाइल",
       lightMode: "लाइट मोड पर स्विच करें",
       darkMode: "डार्क मोड पर स्विच करें",
       selectLanguage: "भाषा चुनें",
@@ -288,6 +300,9 @@ export const translations: Record<SupportedLanguage, TranslationDictionary> = {
       "High Saturated Fat": "अधिक संतृप्त वसा",
       "Moderate Sugar": "मध्यम चीनी",
       "Moderate Sodium": "मध्यम सोडियम",
+      "High sugar for your profile": "आपकी प्रोफ़ाइल के लिए अधिक चीनी",
+      "High sodium for your profile": "आपकी प्रोफ़ाइल के लिए अधिक सोडियम",
+      "High fat for your profile": "आपकी प्रोफ़ाइल के लिए अधिक फैट",
     },
     error: {
       unableToRead: "लेबल पढ़ने में असमर्थ",
@@ -307,6 +322,9 @@ export const translations: Record<SupportedLanguage, TranslationDictionary> = {
       "ब्राउझर-आधारित ओसीआर आणि सोप्या स्पष्टीकरणासह पॅकेज केलेल्या अन्नाचे पोषण तथ्य आणि घटक तपासा व समजून घ्या.",
     nav: {
       title: "फूड लेबल स्पष्टीकरण",
+      scan: "स्कॅन",
+      history: "इतिहास",
+      profile: "प्रोफाइल",
       lightMode: "लाइट मोडवर बदला",
       darkMode: "डार्क मोडवर बदला",
       selectLanguage: "भाषा निवडा",
@@ -392,6 +410,9 @@ export const translations: Record<SupportedLanguage, TranslationDictionary> = {
       "High Saturated Fat": "जास्त सॅच्युरेटेड चरबी",
       "Moderate Sugar": "मध्यम साखर",
       "Moderate Sodium": "मध्यम सोडियम",
+      "High sugar for your profile": "तुमच्या प्रोफाइलसाठी जास्त साखर",
+      "High sodium for your profile": "तुमच्या प्रोफाइलसाठी जास्त सोडियम",
+      "High fat for your profile": "तुमच्या प्रोफाइलसाठी जास्त फॅट",
     },
     error: {
       unableToRead: "लेबल वाचण्यात अडचण आली",
